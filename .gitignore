@@ -2,6 +2,7 @@
 bus_corp_archive/
 *.csv
 *.json
+!examples/*.csv
 
 # API 키 관련
 .env

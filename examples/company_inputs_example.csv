@@ -1,0 +1,3 @@
+업체명,시도,operating_buses,annual_revenue,fuel_liters,cng_m3,transfer_trips,discount_trips,discount_amount_per_trip,new_buses,semi_public_bus_share
+예시교통,충청남도,40,,600000,,300000,120000,1400,2,
+예시여객,경기도,100,,,,,,,,0.25

@@ -1,3 +1,6 @@
 requests>=2.31.0
 pandas>=2.0.0
+PyYAML>=6.0
 schedule>=1.2.0
+openpyxl>=3.1.0   # 입력 파일을 .xlsx 로 줄 때만 필요
+pytest>=8.0       # 테스트

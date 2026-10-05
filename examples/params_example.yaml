@@ -1,0 +1,25 @@
+# 예상보조금 계산용 사용자 파라미터 예시
+# ⚠ 아래 숫자는 계산 흐름을 보여주기 위한 '임의 예시값'이다. 실제 계산 전에 반드시
+#   지자체 표준운송원가 고시·예산서, 국토부 유가보조금 단가 고시 등으로 교체할 것.
+#
+# 키 이름은 data/subsidy_policies.yaml 의 national_params / params 와 동일.
+# regions 키: '시도' 또는 '시도/시군구'
+
+national:
+  fuel_subsidy_per_liter: 300          # 예시값 (원/L)
+  compensation_rate_unprofitable: 0.8  # 예시값
+  compensation_rate_remote: 1.0        # 예시값
+  transfer_loss_per_trip: 500          # 예시값 (원/건)
+  transfer_compensation_rate: 0.5      # 예시값
+  fare_discount_compensation_rate: 1.0 # 예시값
+  vehicle_subsidy_per_bus: 50000000    # 예시값 (원/대)
+
+regions:
+  서울특별시:
+    standard_cost_per_bus_day: 700000  # 예시값 (원/대·일)
+    revenue_per_bus_day: 550000        # 예시값
+    performance_profit_per_bus_year: 0
+  경기도:
+    semi_public_bus_share: 0.3         # 예시값 (협약노선 투입 비율)
+    standard_cost_per_bus_day: 650000  # 예시값
+    revenue_per_bus_day: 500000        # 예시값

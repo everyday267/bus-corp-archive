@@ -1,0 +1,457 @@
+# =====================================================================
+# 지자체별 노선버스 준공영제 시행여부 · 보조금 지급 구조 레지스트리
+# ---------------------------------------------------------------------
+# - 근거: 국가법령정보센터 자치법규 검색 (2026-10-05 조회)
+#         검색어 '준공영제', '공영제', '재정지원 여객자동차'
+# - 조례가 있다고 곧바로 '시행 중'은 아니다. status 판단 근거를 evidence 에 남기고,
+#   지자체 고시·보도자료로 확인하면 verified: true 로 바꾼다.
+# - since(도입연월)는 일반에 알려진 시점을 적어둔 참고값이며 verified 전까지 보고서에 '참고' 표기.
+# - params 값이 null 이면 '입력 필요' — 계산기가 누락 항목으로 보고하고 해당 항목을 계산하지 않는다.
+#   (실제 단가를 추정해서 채우지 말 것. 지자체 예산서·표준운송원가 용역보고서·국토부 고시에서 확인)
+#
+# status 값
+#   시행       : 준공영제(또는 공공관리제)가 운영 중
+#   부분시행   : 일부 노선/업체만 협약 대상 (예: 경기도 공공관리제 협약노선)
+#   조례제정   : 조례는 있으나 시행 여부 미확인
+#   미시행     : 준공영제 조례 미검색, 개별 재정지원(손실보상) 방식
+#   확인필요   : 상충 정보가 있어 사람이 확인해야 함
+#
+# scope 값 (운영구분명과 매칭) : 시내버스 · 농어촌버스 · 마을버스 · 광역버스 · 노선버스(전체)
+# =====================================================================
+
+meta:
+  updated: "2026-10-05"
+  source: "국가법령정보센터 자치법규 (law.go.kr)"
+
+# ---------------------------------------------------------------------
+# 보조금 항목 정의 (계산식은 buscorp/subsidy.py)
+# ---------------------------------------------------------------------
+components:
+  semi_public_deficit:
+    name: 준공영제 재정지원(운송수입 부족분)
+    basis: "각 지자체 준공영제 조례 (예: 서울특별시 시내버스 준공영제 운영에 관한 조례 제8조·제9조)"
+    formula: "max(0, 표준운송원가(원/대·일) × 운행대수 × 운행일수 + 성과이윤 − 운송수입금) × 준공영 대상 비율"
+  unprofitable_route_loss:
+    name: 비수익노선 손실보상
+    basis: "여객자동차 운수사업법 제50조제1항제2호·제2항·제3항, 시·도/시·군·구 재정지원 조례"
+    formula: "Σ노선 max(0, 운행원가 − 운송수입) × 보전율"
+  remote_route_loss:
+    name: 벽지노선 손실보상
+    basis: "여객자동차 운수사업법 제50조, 시·도 재정지원 조례(벽지노선 지정·고시)"
+    formula: "Σ노선 max(0, 운행원가 − 운송수입) × 보전율"
+  transfer_discount_loss:
+    name: 환승할인 손실보전
+    basis: "지자체 대중교통 환승할인 조례·협약"
+    formula: "환승건수 × 건당 손실액 × 보전율"
+  fare_discount_loss:
+    name: 요금할인·무료 손실보전 (어르신·청소년 등)
+    basis: "지자체 요금 지원 조례"
+    formula: "할인 이용건수 × 건당 할인액 × 보전율"
+  fuel_tax_subsidy:
+    name: 유가보조금 (경유 유류세 인상분 / CNG 세금 상당액)
+    basis: "여객자동차 운수사업법 제50조제5항·제6항, 같은 법 시행령"
+    formula: "연료사용량 × 단가 (경유 원/L, CNG 원/㎥)"
+  vehicle_purchase:
+    name: 차량 구입 보조 (저상·전기·수소버스)
+    basis: "대중교통의 육성 및 이용촉진에 관한 법률, 환경친화적 자동차법, 지자체 보조금 조례"
+    formula: "구입대수 × 대당 보조액"
+
+# ---------------------------------------------------------------------
+# 전국 공통 파라미터 (지역 params 가 같은 키를 주면 지역 값이 우선)
+# ---------------------------------------------------------------------
+national_params:
+  operating_days: 365            # 연간 운행일수
+  fuel_subsidy_per_liter: null   # 경유 유가보조금 단가(원/L) — 국토부 고시 확인
+  cng_subsidy_per_m3: null       # CNG 보조 단가(원/㎥) — 지자체 공고 확인
+  compensation_rate_unprofitable: null
+  compensation_rate_remote: null
+  transfer_loss_per_trip: null
+  transfer_compensation_rate: null
+  fare_discount_compensation_rate: null
+  vehicle_subsidy_per_bus: null
+
+# 준공영제 지역 기본 항목 / 비준공영 지역 기본 항목
+default_components:
+  semi_public: [semi_public_deficit, fuel_tax_subsidy, vehicle_purchase]
+  standard: [unprofitable_route_loss, remote_route_loss, transfer_discount_loss,
+             fare_discount_loss, fuel_tax_subsidy, vehicle_purchase]
+
+# ---------------------------------------------------------------------
+# 지역별 레지스트리 (sgg 가 있으면 시군구 항목, 없으면 시도 항목. 시군구가 우선)
+# ---------------------------------------------------------------------
+regions:
+
+  # ---------------- 특별·광역시 ----------------
+  - sido: 서울특별시
+    semi_public:
+      status: 시행
+      scope: [시내버스]
+      model: 수입금공동관리형
+      since: "2004-07"
+      ordinance: 서울특별시 시내버스 준공영제 운영에 관한 조례
+      ordinance_mst: "2009409"
+      ordinance_effective: "2025-01-03"
+      evidence: "조례 제2조(정의)·제7조(수입금 공동관리)·제8조(표준운송원가 2년 주기 산정)·제9조(부족분 재정지원)"
+      verified: false
+    subsidy_rules:
+      revenue_includes_other_subsidies: true   # 수입금에 각종 보조금 포함 → 준공영 적자보전과 중복 방지
+      performance_profit: "표준운송원가상 이윤 일부를 유보, 연 1회 평가 후 차등 지급(조례 제2조제6호·제15조)"
+      settlement: "당해연도 확정정산 비용을 다음연도 6월말까지 지급(조례 제8조제5항)"
+    subsidy_ordinances:
+      - 서울특별시 여객자동차운수사업의 재정지원 및 한정면허 등에 관한 조례
+      - 서울특별시 마을버스 재정지원 및 안전 운행기준 등에 관한 조례
+    params:
+      standard_cost_per_bus_day: null
+      revenue_per_bus_day: null
+
+  - sido: 부산광역시
+    semi_public:
+      status: 시행
+      scope: [시내버스]
+      model: 수입금공동관리형
+      since: "2007-05"
+      ordinance: 부산광역시 시내버스 준공영제 운영에 관한 조례
+      ordinance_mst: "1899549"
+      ordinance_effective: "2024-01-03"
+      verified: false
+    subsidy_rules:
+      revenue_includes_other_subsidies: true
+    subsidy_ordinances:
+      - 부산광역시 여객자동차 운수사업의 재정지원 등에 관한 조례
+      - 부산광역시 강서구 한정면허 버스 재정지원 조례
+      - 부산광역시 남구 마을버스운송사업자 재정 지원 조례
+      - 부산광역시 사하구 마을버스 재정지원 조례
+    params: {standard_cost_per_bus_day: null, revenue_per_bus_day: null}
+
+  - sido: 대구광역시
+    semi_public:
+      status: 시행
+      scope: [시내버스]
+      model: 수입금공동관리형
+      since: "2006-02"
+      ordinance: 대구광역시 시내버스 준공영제 운영에 관한 조례
+      ordinance_mst: "2069067"
+      ordinance_effective: "2025-09-22"
+      verified: false
+    subsidy_rules:
+      revenue_includes_other_subsidies: true
+    subsidy_ordinances:
+      - 대구광역시 군위군 여객자동차 운수사업 재정지원 조례
+    notes: "군위군(2023 대구 편입) 농어촌버스는 별도 재정지원 조례 적용 — sgg 항목 참고"
+    params: {standard_cost_per_bus_day: null, revenue_per_bus_day: null}
+
+  - sido: 대구광역시
+    sgg: 군위군
+    semi_public:
+      status: 미시행
+      scope: [농어촌버스]
+      evidence: "군위군 여객자동차 운수사업 재정지원 조례(2025-11-17)만 검색"
+      verified: false
+    subsidy_ordinances: [대구광역시 군위군 여객자동차 운수사업 재정지원 조례]
+
+  - sido: 인천광역시
+    semi_public:
+      status: 시행
+      scope: [시내버스]
+      model: 수입금공동관리형
+      since: "2009-08"
+      ordinance: 인천광역시 시내버스 준공영제 운영에 관한 조례
+      ordinance_mst: "1802189"
+      ordinance_effective: "2023-04-17"
+      verified: false
+    subsidy_rules:
+      revenue_includes_other_subsidies: true
+    subsidy_ordinances:
+      - 인천광역시 여객자동차 운수사업 등에 관한 조례
+      - 남동구 광역급행형 시내버스운송사업 재정지원 조례
+    params: {standard_cost_per_bus_day: null, revenue_per_bus_day: null}
+
+  - sido: 광주광역시
+    semi_public:
+      status: 시행
+      scope: [시내버스]
+      model: 수입금공동관리형
+      since: "2006-12"
+      ordinance: 광주광역시 시내버스 준공영제 운영 조례
+      ordinance_mst: "1934603"
+      ordinance_effective: "2024-12-01"
+      evidence: "법령DB상 지자체명 '(구)광주광역시' — 2026 전남광주통합특별시 출범에 따른 표기. 통합 후 운영주체 확인 필요"
+      verified: false
+    subsidy_rules:
+      revenue_includes_other_subsidies: true
+    params: {standard_cost_per_bus_day: null, revenue_per_bus_day: null}
+
+  - sido: 대전광역시
+    semi_public:
+      status: 시행
+      scope: [시내버스]
+      model: 수입금공동관리형
+      since: "2005-07"
+      ordinance: 대전광역시 시내버스 준공영제 운영 조례
+      ordinance_mst: "2063643"
+      ordinance_effective: "2025-08-08"
+      verified: false
+    subsidy_rules:
+      revenue_includes_other_subsidies: true
+    params: {standard_cost_per_bus_day: null, revenue_per_bus_day: null}
+
+  - sido: 울산광역시
+    semi_public:
+      status: 확인필요
+      scope: [시내버스]
+      evidence: "'준공영제' 조례 미검색(2026-10-05). 재정지원 조례만 검색됨 → 도입 추진 여부 별도 확인"
+      verified: false
+    subsidy_ordinances:
+      - 울산광역시 여객자동차 운수사업의 재정지원 등에 관한 조례
+      - 울산광역시 여객자동차 운수사업의 재정지원 및 마을버스운송사업의 등록 등에 관한 조례 시행규칙
+      - 울산광역시 울주군 어르신 등 시내버스 요금 지원에 관한 조례
+
+  - sido: 세종특별자치시
+    semi_public:
+      status: 확인필요
+      scope: [시내버스]
+      evidence: "준공영제 조례 미검색. 시 출자 공기업(세종도시교통공사) 공영 운행 병행 — 공영/민영 노선 구분 확인 필요"
+      verified: false
+
+  # ---------------- 도 ----------------
+  - sido: 경기도
+    semi_public:
+      status: 부분시행
+      scope: [시내버스]
+      model: 공공관리제(공공지원형·노선입찰형)
+      ordinance: 경기도 시내버스 공공관리제 운영에 관한 조례
+      ordinance_mst: "1887261"
+      ordinance_effective: "2023-12-22"
+      evidence: "조례 제2조: 공공지원형(협약노선 수입금 통합관리·운송비용 지원), 노선입찰형(경쟁입찰 운송사업자 선정). 협약노선에 한해 적용"
+      verified: false
+    subsidy_rules:
+      revenue_includes_other_subsidies: true   # 조례 제2조제5호: 운송수입금에 보조금 포함
+      partial_param: semi_public_bus_share
+    subsidy_ordinances:
+      - 가평군 노선 여객자동차운송사업 재정 지원 조례
+      - 구리시 여객자동차운송사업 재정지원 조례
+      - 김포시 여객자동차 운수사업 재정지원 조례
+      - 남양주시 여객자동차운수사업 재정지원 조례
+      - 시흥시 여객자동차운송사업 운영 및 지원에 관한 조례
+      - 안양시 여객자동차운송사업 재정 지원 조례
+      - 양주시 여객자동차 운수사업 재정지원 조례
+      - 여주시 여객자동차 운수사업 재정 지원에 관한 조례
+      - 연천군 여객자동차운송사업 재정 지원 조례
+      - 의왕시 여객자동차운송사업 재정지원 조례
+      - 의정부시 여객자동차운송사업 재정 지원 조례
+      - 이천시 여객자동차운송사업 재정지원에 관한 조례
+      - 포천시 여객자동차운송사업 재정 지원 조례
+      - 하남시 노선여객자동차운송사업 재정 지원 조례
+    params:
+      semi_public_bus_share: null    # 업체 보유대수 중 공공관리제 협약노선 투입 비율
+      standard_cost_per_bus_day: null
+      revenue_per_bus_day: null
+
+  - sido: 경기도
+    sgg: 용인시
+    semi_public:
+      status: 조례제정
+      scope: [노선버스]
+      ordinance: 용인시 노선버스 준공영제 운영에 관한 조례
+      ordinance_mst: "1989953"
+      ordinance_effective: "2024-12-06"
+      verified: false
+
+  - sido: 경기도
+    sgg: 양주시
+    semi_public:
+      status: 조례제정
+      scope: [노선버스]
+      ordinance: 양주시 노선버스 준공영제 운영에 관한 조례
+      ordinance_mst: "2044297"
+      ordinance_effective: "2025-06-16"
+      verified: false
+    subsidy_ordinances: [양주시 여객자동차 운수사업 재정지원 조례]
+
+  - sido: 경기도
+    sgg: 광명시
+    semi_public:
+      status: 조례제정
+      scope: [마을버스]
+      ordinance: 광명시 마을버스 준공영제 운영에 관한 조례
+      ordinance_mst: "2123895"
+      ordinance_effective: "2026-04-17"
+      verified: false
+
+  - sido: 경기도
+    sgg: 파주시
+    semi_public:
+      status: 조례제정
+      scope: [마을버스]
+      ordinance: 파주시 마을버스 준공영제 운영에 관한 조례
+      ordinance_mst: "1725939"
+      ordinance_effective: "2022-09-01"
+      verified: false
+
+  - sido: 경기도
+    sgg: 하남시
+    semi_public:
+      status: 조례제정
+      scope: [마을버스]
+      ordinance: 하남시 마을버스 준공영제 운영에 관한 조례
+      ordinance_mst: "1845115"
+      ordinance_effective: "2023-08-04"
+      verified: false
+    subsidy_ordinances: [하남시 노선여객자동차운송사업 재정 지원 조례]
+
+  - sido: 강원특별자치도
+    semi_public:
+      status: 미시행
+      scope: [노선버스]
+      evidence: "도 단위 준공영제 조례 미검색 — 시군 단위 항목 참고"
+      verified: false
+    subsidy_ordinances:
+      - 동해시 여객자동차 운수사업 재정지원 조례
+      - 영월군 여객자동차 운수사업 재정지원 조례
+      - 인제군 한정면허 버스 재정지원 조례
+      - 철원군 여객자동차 운수사업 재정지원 조례
+      - 홍천군 여객자동차 운수사업 재정지원 조례
+      - 화천군 여객자동차 운수사업 재정지원 조례
+
+  - sido: 강원특별자치도
+    sgg: 춘천시
+    semi_public:
+      status: 조례제정
+      scope: [노선버스]
+      ordinance: 춘천시 노선버스 준공영제 운영에 관한 조례
+      ordinance_mst: "1804595"
+      ordinance_effective: "2023-04-27"
+      verified: false
+    subsidy_ordinances: [춘천시 여객자동차 운수사업 재정지원 조례]
+
+  - sido: 충청북도
+    semi_public:
+      status: 미시행
+      scope: [노선버스]
+      evidence: "도 단위 준공영제 조례 미검색 — 청주시 항목 참고"
+      verified: false
+    subsidy_ordinances: [음성군 여객자동차 운수사업 재정지원 조례]
+
+  - sido: 충청북도
+    sgg: 청주시
+    semi_public:
+      status: 시행
+      scope: [시내버스]
+      model: 수입금공동관리형
+      since: "2021-01"
+      ordinance: 청주시 시내버스 준공영제 운영에 관한 조례
+      ordinance_mst: "1930749"
+      ordinance_effective: "2024-07-01"
+      evidence: "조례 및 시행규칙(2024-11-15) 검색"
+      verified: false
+    subsidy_rules:
+      revenue_includes_other_subsidies: true
+    params: {standard_cost_per_bus_day: null, revenue_per_bus_day: null}
+
+  - sido: 충청남도
+    semi_public:
+      status: 미시행
+      scope: [노선버스]
+      evidence: "준공영제 조례 미검색(2026-10-05)"
+      verified: false
+
+  - sido: 전북특별자치도
+    semi_public:
+      status: 미시행
+      scope: [노선버스]
+      evidence: "준공영제 조례 미검색(2026-10-05)"
+      verified: false
+    subsidy_ordinances:
+      - 전북특별자치도 여객자동차운수사업 보조금 지원조례
+      - 고창군 여객자동차 운수사업 보조금 지원 조례
+      - 군산시 여객자동차운수사업 재정 지원 조례
+      - 김제시 여객자동차운수사업 재정지원 조례
+      - 남원시 여객자동차운수사업 재정지원 조례
+      - 임실군 여객자동차 운수사업 재정지원 조례
+      - 정읍시 여객자동차운수사업 보조금 지원 조례
+      - 진안군 여객자동차 운수사업 재정지원 조례
+
+  - sido: 전라남도
+    semi_public:
+      status: 미시행
+      scope: [노선버스]
+      evidence: "준공영제 조례 미검색. 2026 전남광주통합특별시 출범 — 법령DB상 시군 조례는 '전남광주통합특별시 ○○군'으로 표기"
+      verified: false
+    subsidy_ordinances:
+      - 고흥군 여객자동차운수사업 재정지원 조례
+      - 곡성군 여객자동차 운수사업 재정지원 조례
+      - 광양시 여객자동차 운수사업 재정지원 조례
+      - 구례군 여객자동차운수사업 재정지원 조례
+      - 담양군 여객자동차운수사업 재정지원 조례
+      - 순천시 여객자동차 운수사업 재정지원 조례
+      - 여수시 여객자동차 운수사업 재정지원 조례
+      - 장성군 여객자동차 운수사업 재정지원 조례
+      - 진도군 여객자동차 운수사업 재정지원 조례
+
+  - sido: 경상북도
+    semi_public:
+      status: 미시행
+      scope: [노선버스]
+      evidence: "준공영제 조례 미검색(2026-10-05)"
+      verified: false
+    subsidy_ordinances:
+      - 경상북도 여객자동차운수사업 재정지원 조례
+      - 경산시 여객자동차운송사업 재정지원 조례
+      - 경주시 여객자동차운송사업 재정지원에 관한 조례
+      - 구미시 여객자동차운송사업 재정지원 조례
+      - 김천시 여객자동차운송사업 재정지원에 관한 조례
+      - 문경시 여객자동차 운수사업 재정지원 조례
+      - 봉화군 여객자동차 운수사업 재정지원 조례
+      - 예천군 여객자동차 운수사업 재정지원에 관한 조례
+      - 울릉군 여객자동차 운수사업 재정지원 조례
+      - 울진군 여객자동차 운수사업 재정지원 조례
+      - 청송군 여객자동차 운수사업 재정지원 조례
+      - 포항시 대중교통 운송사업의 재정지원 등에 관한 조례
+      - 포항시 여객자동차운수사업 재정지원 조례
+
+  - sido: 경상남도
+    semi_public:
+      status: 미시행
+      scope: [노선버스]
+      evidence: "도 단위 준공영제 조례 미검색 — 창원시 항목 참고"
+      verified: false
+    subsidy_ordinances:
+      - 경상남도 여객자동차 운수사업자 및 대중교통운영자 재정지원 조례
+      - 거제시 여객자동차운송사업 재정지원 조례
+      - 남해군 여객자동차운수사업자 및 대중교통운영자 재정지원 조례
+      - 사천시 여객자동차 운수사업 재정지원 조례
+      - 산청군 여객자동차 운수사업 재정지원 조례
+      - 양산시 여객자동차 운송사업 재정지원 및 관리 조례
+      - 창녕군 여객자동차운수사업 재정지원 조례
+      - 통영시 여객자동차운송사업 재정지원 조례
+      - 하동군 여객자동차 운수사업자 및 대중교통 운영자 재정 지원 조례
+
+  - sido: 경상남도
+    sgg: 창원시
+    semi_public:
+      status: 시행
+      scope: [시내버스]
+      model: 수입금공동관리형
+      since: "2021-09"
+      ordinance: 창원시 시내버스 준공영제 운영 조례
+      ordinance_mst: "1732821"
+      ordinance_effective: "2022-10-07"
+      verified: false
+    subsidy_rules:
+      revenue_includes_other_subsidies: true
+    params: {standard_cost_per_bus_day: null, revenue_per_bus_day: null}
+
+  - sido: 제주특별자치도
+    semi_public:
+      status: 시행
+      scope: [노선버스]
+      model: 수입금공동관리형
+      since: "2017-08"
+      ordinance: 제주특별자치도 버스 준공영제 운영에 관한 조례
+      ordinance_mst: "1837769"
+      ordinance_effective: "2023-07-14"
+      evidence: "운영 조례 + 버스 준공영제 도민서비스평가단 운영 조례(2023-10-12)"
+      verified: false
+    subsidy_rules:
+      revenue_includes_other_subsidies: true
+    params: {standard_cost_per_bus_day: null, revenue_per_bus_day: null}
