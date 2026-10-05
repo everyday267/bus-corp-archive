@@ -1,7 +1,7 @@
 """CLI: python -m buscorp <command>
 
   corps        전국 버스업체 표준데이터 수집
-  routes       TAGO 노선별 운행정보 수집 (--city 도시코드, 생략 시 전체)
+  routes       노선별 운행정보 수집 — 서울·경기·TAGO (--source), 업체 매칭·업체별 요약
   ordinances   준공영제·재정지원 조례 검색 → 레지스트리 대조표
   policy       레지스트리 검증 + 지자체별 준공영제 현황표 출력
   estimate     업체별 예상보조금 계산
@@ -20,7 +20,8 @@ from pathlib import Path
 import pandas as pd
 
 from . import config
-from .collectors import bus_corps, ordinances, routes
+from .api import ApiError
+from .collectors import bus_corps, gyeonggi_routes, ordinances, route_common, routes, seoul_routes
 from .policy import PolicyRegistry
 from .subsidy import estimate_all, load_table, load_user_params
 
@@ -69,10 +70,38 @@ def cmd_corps(args) -> pd.DataFrame:
 
 def cmd_routes(args) -> None:
     key = config.require(config.PUBLIC_DATA_API_KEY, "PUBLIC_DATA_API_KEY")
-    df = routes.collect(key, args.city or None, with_detail=not args.no_detail, with_stops=args.stops)
-    df["1일운행횟수(추정)"] = df.apply(routes.daily_trips_estimate, axis=1)
-    path = _save(df, "routes")
-    _log("routes", len(df), path)
+    sources = ["seoul", "gyeonggi", "tago"] if "all" in args.source else args.source
+    frames = []
+    for src in sources:
+        try:
+            if src == "seoul":
+                df = seoul_routes.collect(key, args.terms)
+            elif src == "gyeonggi":
+                df = gyeonggi_routes.collect(
+                    key, args.terms, with_detail=not args.no_detail, max_details=args.max_details,
+                    cache_path=_out("cache") / "gyeonggi_route_detail.json",
+                )
+            else:
+                df = routes.collect(key, args.city or None, with_detail=not args.no_detail, with_stops=args.stops)
+        except ApiError as e:  # 한 출처 실패가 나머지 수집을 막지 않도록
+            print(f"  [{src}] 수집 실패: {e}")
+            continue
+        _log(f"routes:{src}", len(df), _save(df, f"routes_{src}"))
+        frames.append(df)
+    if not frames:
+        raise SystemExit("[실패] 수집된 노선이 없습니다.")
+
+    allr = pd.concat(frames, ignore_index=True)
+    corps_path = _out("bus_corps_latest.csv")
+    if corps_path.exists():
+        allr = route_common.match_companies(allr, load_table(corps_path))
+        summary = route_common.summarize_by_company(allr)
+        _save(summary, "routes_by_company")
+        rate = (allr["매칭방식"].isin(["시도+업체명", "업체명(전국유일)"])).mean()
+        print(f"  업체 매칭률 {rate:.0%} (미매칭 업체명은 routes_all 의 '매칭방식' 컬럼 참고)")
+    else:
+        print("  ※ bus_corps_latest.csv 가 없어 업체 매칭 생략 — `python -m buscorp corps` 먼저 실행")
+    _save(allr, "routes_all")
 
 
 def cmd_ordinances(args) -> None:
@@ -144,10 +173,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("corps", help="버스업체 표준데이터 수집")
 
-    r = sub.add_parser("routes", help="TAGO 노선 운행정보 수집")
-    r.add_argument("--city", nargs="*", help="TAGO 도시코드 (예: 25 대전, 22 대구)")
-    r.add_argument("--no-detail", action="store_true", help="노선 상세(배차간격) 조회 생략")
-    r.add_argument("--stops", action="store_true", help="경유 정류소 수까지 조회 (호출량 많음)")
+    r = sub.add_parser("routes", help="노선 운행정보 수집 (서울·경기·TAGO)")
+    r.add_argument("--source", nargs="+", default=["all"], choices=["all", "seoul", "gyeonggi", "tago"],
+                   help="수집 출처 (기본 all)")
+    r.add_argument("--city", nargs="*", help="TAGO 도시코드 (예: 25 대전, 22 대구). 생략 시 TAGO 전 도시")
+    r.add_argument("--terms", nargs="*", help="서울·경기 노선번호 검색어 (기본 0~9)")
+    r.add_argument("--max-details", type=int, help="경기 노선 상세 1회 호출 상한 (트래픽 한도 대비)")
+    r.add_argument("--no-detail", action="store_true", help="노선 상세 조회 생략 (경기: 업체명 없음)")
+    r.add_argument("--stops", action="store_true", help="TAGO 경유 정류소 수까지 조회 (호출량 많음)")
 
     sub.add_parser("ordinances", help="준공영제 조례 점검")
     sub.add_parser("policy", help="레지스트리 검증·현황표")

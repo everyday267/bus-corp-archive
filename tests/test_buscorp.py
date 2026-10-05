@@ -180,9 +180,13 @@ def test_estimate_all_matches_inputs(reg):
 
 
 # ---------------------------------------------------------------- collectors
-def test_daily_trips_estimate():
-    row = pd.Series({"intervaltime": 15, "startvehicletime": "0530", "endvehicletime": "2330"})
-    assert routes.daily_trips_estimate(row) == 18 * 4 + 1
+def test_tago_standardize():
+    df = routes.standardize([{"cityname": "대전광역시", "routeid": "R1", "routeno": "102",
+                              "startvehicletime": "0530", "endvehicletime": "2330", "intervaltime": 15}])
+    row = df.iloc[0]
+    assert (row["출처"], row["시도"], row["노선번호"]) == ("TAGO", "대전광역시", "102")
+    assert row["1일운행횟수(추정)"] == 18 * 4 + 1
+    assert routes.standardize([{"cityname": "청주시", "routeid": "R2"}]).iloc[0]["시도"] == ""
 
 
 def test_ordinance_diff(reg):

@@ -30,6 +30,7 @@ SIDO_ALIASES: dict[str, str] = {
     "경남": "경상남도",
     "제주": "제주특별자치도", "제주도": "제주특별자치도",
 }
+SIDO_NAMES = set(SIDO_ALIASES.values()) | {"전남광주통합특별시"}
 
 
 def normalize_sido(name: str | None) -> str:
